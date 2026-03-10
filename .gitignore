@@ -1,0 +1,36 @@
+# Datasets and large files
+data/
+
+# Download scripts and logs
+download_datasets.sh
+download_log.txt
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Model checkpoints and outputs
+*.h5
+*.hdf5
+*.pkl
+*.npy
+*.npz
+
+# IDE
+.vscode/
+.idea/
