@@ -4,16 +4,24 @@
 
 import os
 import numpy as np
-import scipy.io.wavfile as wav
+import scipy.io.wavfile as wav  # wav 파일 읽기
 import utils
-from sklearn import preprocessing
-from sklearn.externals import joblib
-from IPython import embed
+from sklearn import preprocessing  # StandardScaler
+from sklearn.externals import joblib  # scaler 저장/불러오기
+from IPython import embed  # 디버깅
 import matplotlib.pyplot as plot
-plot.switch_backend('agg')
+plot.switch_backend('agg')  # 디스플레이 없는 서버에서 그래프 저장 가능하게
 
 
 class FeatureClass:
+    '''
+    dataset : 어떤 데이터셋인지 (ansim, resim 등)
+    ov : 최대 동시 겹치는 소리 수 (1, 2, 3)
+    split : 교차검증 분할 번호
+    nfft : FFT 크기 (주파수 해상도 결정)
+    db : 신호 대 잡음비 (30dB 고정)
+    wav_extra_name, desc_extra_name : 경로 뒤에 붙이는 접미사 (특수 실험용)
+    '''
     def __init__(self, dataset='ansim', ov=3, split=1, nfft=1024, db=30, wav_extra_name='', desc_extra_name=''):
 
         _data_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
@@ -33,8 +41,8 @@ class FeatureClass:
             self._base_folder = os.path.join(_data_root, 'mreal')
 
         # Input directories
-        self._aud_dir = os.path.join(self._base_folder, 'wav_ov{}_split{}_{}db{}'.format(ov, split, db, wav_extra_name))
-        self._desc_dir = os.path.join(self._base_folder, 'desc_ov{}_split{}{}'.format(ov, split, desc_extra_name))
+        self._aud_dir = os.path.join(self._base_folder, 'wav_ov{}_split{}_{}db{}'.format(ov, split, db, wav_extra_name))  # 오디오 wav 파일이 있는 폴더
+        self._desc_dir = os.path.join(self._base_folder, 'desc_ov{}_split{}{}'.format(ov, split, desc_extra_name))  # 각 오디오에 대응하는 csv 메타데이터가 있는 폴더
 
         # Output directories
         self._label_dir = None
@@ -47,16 +55,16 @@ class FeatureClass:
         self._split = split
         self._db = db
         self._nfft = nfft
-        self._win_len = self._nfft
-        self._hop_len = self._nfft//2
+        self._win_len = self._nfft  # FFT window 크기
+        self._hop_len = self._nfft//2  # widow의 50% overlap
         self._dataset = dataset
-        self._eps = np.spacing(np.float(1e-16))
+        self._eps = np.spacing(np.float(1e-16))  # epsilon : 0으로 나누기 방지
 
         # If circular-array 8 channels else 4 for Ambisonic
         if 'c' in self._dataset:
-            self._nb_channels = 8
+            self._nb_channels = 8  # 원형 마이크 배열 (8채널)
         else:
-            self._nb_channels = 4
+            self._nb_channels = 4  # Ambisonic (4채널 : W,X,Y,Z)
 
         # Sound event classes dictionary
         self._unique_classes = dict()
@@ -90,23 +98,25 @@ class FeatureClass:
                     'speech': 5
                 }
 
-        self._fs = 44100
-        self._frame_res = self._fs / float(self._hop_len)
-        self._hop_len_s = self._nfft/2.0/self._fs
-        self._nb_frames_1s = int(1 / self._hop_len_s)
-        self._fade_win_size = 0.01 * self._fs
+        self._fs = 44100  # sampling rate = 44.1kHz
+        self._frame_res = self._fs / float(self._hop_len)  # 1초당 프레임 수 = 44100/256 = 172
+        self._hop_len_s = self._nfft/2.0/self._fs  # hop_len 초 단위 = 256/44100=0.0058s
+        self._nb_frames_1s = int(1 / self._hop_len_s)  # 1s=172 frame
+        self._fade_win_size = 0.01 * self._fs  # 10ms = 441 samples
 
-        self._resolution = 10
-        self._azi_list = range(-180, 180, self._resolution)
-        self._length = len(self._azi_list)
-        self._ele_list = range(-60, 60, self._resolution)
-        self._height = len(self._ele_list)
+        # DOA estimation에 사용할 azimuth/elevation 그리드 (10도 간격)
+        self._resolution = 10  # 방위각/고도각 해상도 = 10도
+        self._azi_list = range(-180, 180, self._resolution)  # azimuth -180~180도 10도 간격으로 - 36개
+        self._length = len(self._azi_list)  # 36
+        self._ele_list = range(-60, 60, self._resolution) # elevation -60~60도 10도 간격으로 - 12개
+        self._height = len(self._ele_list)  # 12
         self._weakness = None
 
-        # For regression task only
+        # For regression task only: 소리가 없는 구간의 레이블 기본값 - 그리드 밖의 값
         self._default_azi = 180
         self._default_ele = 60
 
+        # 기본값이 실제 그리드 안에 포함되면 종료 (안전장치)
         if self._default_azi in self._azi_list:
             print('ERROR: chosen default_azi value {} should not exist in azi_list'.format(self._default_azi))
             exit()
@@ -114,38 +124,45 @@ class FeatureClass:
             print('ERROR: chosen default_ele value {} should not exist in ele_list'.format(self._default_ele))
             exit()
 
-        self._audio_max_len_samples = 30 * self._fs  # TODO: Fix the audio synthesis code to always generate 30s of
+        self._audio_max_len_samples = 30 * self._fs  # 모든 오디오를 30초로 통일 30s * 44100 = 1,323,000 samples
+        # TODO: Fix the audio synthesis code to always generate 30s of
         # audio. Currently it generates audio till the last active sound event, which is not always 30s long. This is a
         # quick fix to overcome that. We need this because, for processing and training we need the length of features
         # to be fixed.
 
         self._max_frames = int(np.ceil((self._audio_max_len_samples - self._win_len) / float(self._hop_len)))
+        # 30초 오디오에서 FFT 슬라이딩하면 나오는 프레임 수 : (1,323,000-512)/256=5166 프레임
 
     def _load_audio(self, audio_path):
-        fs, audio = wav.read(audio_path)
-        audio = audio[:, :self._nb_channels] / 32768.0 + self._eps
+        fs, audio = wav.read(audio_path)  # (샘플수, 채널수)
+        audio = audio[:, :self._nb_channels] / 32768.0 + self._eps  # 필요한 채널수만큼 자르고 
+        # 16bit wav 파일의 샘플값(-32768~32767) : int16 -> float32로 정규화 -1.0~1.0
         if audio.shape[0] < self._audio_max_len_samples:
-            zero_pad = np.zeros((self._audio_max_len_samples - audio.shape[0], audio.shape[1]))
-            audio = np.vstack((audio, zero_pad))
+            zero_pad = np.zeros((self._audio_max_len_samples - audio.shape[0], audio.shape[1]))  
+            audio = np.vstack((audio, zero_pad))  # 30초보다 짧으면 뒤에 제로패딩
         elif audio.shape[0] > self._audio_max_len_samples:
-            audio = audio[:self._audio_max_len_samples, :]
+            audio = audio[:self._audio_max_len_samples, :]  # 30초보다 길면 잘라냄
         return audio, fs
 
     # INPUT FEATURES
     @staticmethod
     def _next_greater_power_of_2(x):
-        return 2 ** (x - 1).bit_length()
+        return 2 ** (x - 1).bit_length()  # x보다 크거나 같은 2의 거듭제곱 반환
 
     def _spectrogram(self, audio_input):
-        _nb_ch = audio_input.shape[1]
-        hann_win = np.repeat(np.hanning(self._win_len)[np.newaxis].T, _nb_ch, 1)
-        nb_bins = self._nfft // 2
-        spectra = np.zeros((self._max_frames, nb_bins, _nb_ch), dtype=complex)
-        for ind in range(self._max_frames):
-            start_ind = ind * self._hop_len
-            aud_frame = audio_input[start_ind + np.arange(0, self._win_len), :] * hann_win
+        _nb_ch = audio_input.shape[1]  # 채널 수
+        hann_win = np.repeat(np.hanning(self._win_len)[np.newaxis].T, _nb_ch, 1)  # 모든 채널에 동일한 윈도우를 한번에 곱하기 위함
+        nb_bins = self._nfft // 2  # 256
+        spectra = np.zeros((self._max_frames, nb_bins, _nb_ch), dtype=complex)  # 결과 저장 배열 초기화, 복소수로 저장(크기+위상)
+        
+        for ind in range(self._max_frames): # ind : 0, 1, 2, ... , 5156
+            start_ind = ind * self._hop_len  # 프레임의 시작 샘플 위치 (256씩 이동) 0, 256, 512, ...
+            aud_frame = audio_input[start_ind + np.arange(0, self._win_len), :] * hann_win  # 윈도잉
             spectra[ind] = np.fft.fft(aud_frame, n=self._nfft, axis=0, norm='ortho')[:nb_bins, :]
+
         return spectra
+        # 최종 출력 shape : (max_frames, 256, 4) 
+        # max_frames: 시간 프레임 수 (5166), 256: 주파수 bin 수, 4: 채널 수, dtype: complex(크기+위상 보존) 
 
     def _extract_spectrogram_for_file(self, audio_filename):
         audio_in, fs = self._load_audio(os.path.join(self._aud_dir, audio_filename))
