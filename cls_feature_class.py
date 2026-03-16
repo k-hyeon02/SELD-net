@@ -142,7 +142,7 @@ class FeatureClass:
             audio = np.vstack((audio, zero_pad))  # 30초보다 짧으면 뒤에 제로패딩
         elif audio.shape[0] > self._audio_max_len_samples:
             audio = audio[:self._audio_max_len_samples, :]  # 30초보다 길면 잘라냄
-        return audio, fs
+        return audio, fs  # audio shape : (1,323,000, 채널수), fs : 44100
 
     # INPUT FEATURES
     @staticmethod
@@ -167,28 +167,34 @@ class FeatureClass:
     def _extract_spectrogram_for_file(self, audio_filename):
         audio_in, fs = self._load_audio(os.path.join(self._aud_dir, audio_filename))
         audio_spec = self._spectrogram(audio_in)
-        print(audio_spec.shape)
+        print(audio_spec.shape)  # (5166, 256, 4) : 시간 프레임 수, 주파수 bin 수, 채널 수
+        # (5166, 256, 4) -> (5166, 1024)
         np.save(os.path.join(self._feat_dir, audio_filename), audio_spec.reshape(self._max_frames, -1))
 
     # OUTPUT LABELS
     def _read_desc_file(self, desc_filename):
+        # csv 메타데이터 파일 내용 담을 빈 딕셔너리 생성
         desc_file = {
             'class': list(), 'start': list(), 'end': list(), 'ele': list(), 'azi': list(),
             'ele_dir': list(), 'azi_dir': list(), 'ang_vel': list(), 'dist': list()
         }
         fid = open(os.path.join(self._desc_dir, desc_filename), 'r')
-        next(fid)
+        next(fid)  # 헤더 행 스킵
+
         for line in fid:
-            split_line = line.strip().split(',')
-            if 'real' in self._dataset:
+            split_line = line.strip().split(',')  # csv 각 행을 쉼표로 분리
+            # class명 추출
+            if 'real' in self._dataset:  # real dataset인 경우 
                 desc_file['class'].append(split_line[0].split('.')[0].split('-')[1])
             else:
                 desc_file['class'].append(split_line[0].split('.')[0][:-3])
+
             desc_file['start'].append(int(np.floor(float(split_line[1])*self._frame_res)))
             desc_file['end'].append(int(np.ceil(float(split_line[2])*self._frame_res)))
             desc_file['ele'].append(int(float(split_line[3])))
             desc_file['azi'].append(int(float(split_line[4])))
-            if self._dataset[0] is 'm':
+
+            if self._dataset[0] is 'm':  # moving sound source dataset인 경우
                 if 'real' in self._dataset:
                     desc_file['ang_vel'].append(int(float(split_line[5])))
                     desc_file['dist'].append(float(split_line[6]))
@@ -203,46 +209,52 @@ class FeatureClass:
         return desc_file
 
     def get_list_index(self, azi, ele):
-        azi = (azi - self._azi_list[0]) // 10
-        ele = (ele - self._ele_list[0]) // 10
-        return azi * self._height + ele
+        azi = (azi - self._azi_list[0]) // 10  # azimuth를 0~35 사이의 정수 인덱스로 반환
+        ele = (ele - self._ele_list[0]) // 10  # elevation을 0~11 사이의 정수 인덱스로 반환
+        return azi * self._height + ele  # 2D grid(azi, ele)를 1D 인덱스로 변환 (0~431 사이의 정수)
 
     def _get_matrix_index(self, ind):
-        azi, ele = ind // self._height, ind % self._height
-        azi = (azi * 10 + self._azi_list[0])
+        azi, ele = ind // self._height, ind % self._height  # 1D 인덱스를 2D grid(azi, ele)로 변환
+        azi = (azi * 10 + self._azi_list[0])  # 인덱스를 실제 각도로 변환
         ele = (ele * 10 + self._ele_list[0])
         return azi, ele
 
-    def get_vector_index(self, ind):
-        azi = (ind * 10 + self._azi_list[0])
+    def get_vector_index(self, ind):  # 수평면(2D)만 고려하는 단순한 DOA 추정에 쓰이는 함수
+        azi = (ind * 10 + self._azi_list[0])  # azimuth만 실제 각도로 변환
         return azi
 
     @staticmethod
-    def scaled_cross_product(a, b):
-        ab = np.dot(a, b)
+    def scaled_cross_product(a, b):  # a -> b (unit vectors) 이동할 때 회전축 벡터
+        ab = np.dot(a, b)  
         if ab > 1 or ab < -1:
-            return [999]
+            return [999]  # error
 
-        acos_ab = np.arccos(ab)
-        x = np.cross(a, b)
+        acos_ab = np.arccos(ab)  # a와 b 사이의 각도(radian)
+        x = np.cross(a, b)  # 외적 : a, b 둘 다에 수직인 벡터 = 회전축 방향
+
         if acos_ab == np.pi or acos_ab == 0 or sum(x) == 0:
+            # a,b가 반대 방향(무한 개의 회전축), 같은 방향
             return [999]
         else:
-            return x/np.sqrt(np.sum(x**2))
+            return x/np.sqrt(np.sum(x**2))  # 단위 벡터로 정규화된 회전축 벡터 반환
 
     def get_trajectory(self, event_length_s, _start_xyz, _rot_vec, _random_ang_vel):
-        frames_per_sec = self._fs / self._fade_win_size
-        ang_vel_per_win = _random_ang_vel / frames_per_sec
-        nb_frames = int(np.ceil(event_length_s * frames_per_sec))
-        xyz_array = np.zeros((nb_frames, 3))
+        frames_per_sec = self._fs / self._fade_win_size  # 44100/441= 100frame/s : 초당 프레임
+        ang_vel_per_win = _random_ang_vel / frames_per_sec  # 초당 각속도
+        nb_frames = int(np.ceil(event_length_s * frames_per_sec))  # 이벤트 길이(초) -> 총 프레임 수
+        xyz_array = np.zeros((nb_frames, 3))  # 결과 저장할 배열 : (총 프레임 수, xyz)
         for frame in range(nb_frames):
             _R = self.rotate_matrix_vec_ang(_rot_vec, frame * ang_vel_per_win)
+            # ex) frame 0 → 0도 회전, frame 1 → 0.3도 회전, frame 2 → 0.6도 회전 ...
             xyz_array[frame, :] = np.dot(_start_xyz, _R.T)
+            # 시작 위치를 R만큼 회전시켜 해당 프레임의 위치 계산
+
         return xyz_array
 
 
     @staticmethod
-    def rotate_matrix_vec_ang(_rot_vec, theta):
+    def rotate_matrix_vec_ang(_rot_vec, theta):  # _rot_vec 방향으로 theta만큼 회전하는 회전 행렬 계산
+        # u_x_u = u ⊗ u : 회전축의 외적 텐서 (3x3)
         u_x_u = np.array(
             [
                 [_rot_vec[0] ** 2, _rot_vec[0] * _rot_vec[1], _rot_vec[0] * _rot_vec[2]],
@@ -251,6 +263,7 @@ class FeatureClass:
             ]
         )
 
+        # u_x = [u]× : 회전축의 반대칭 행렬 (외적 연산자)
         u_x = np.array(
             [
                 [0, -_rot_vec[2], _rot_vec[1]],
@@ -258,6 +271,9 @@ class FeatureClass:
                 [-_rot_vec[1], _rot_vec[0], 0]
             ]
         )
+        # np.eye(3) * np.cos(theta)	: I·cos(θ) - 원래 방향 성분
+        # np.sin(theta) * u_x : sin(θ)·[u]× - 회전축에 수직인 성분
+        # (1-np.cos(theta)) * u_x_u	: (1-cos(θ))·(u ⊗ u) - 회전축 방향 성분
         return np.eye(3) * np.cos(theta) + np.sin(theta) * u_x + (1 - np.cos(theta)) * u_x_u
 
     @staticmethod
