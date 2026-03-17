@@ -241,7 +241,7 @@ class FeatureClass:
     def get_trajectory(self, event_length_s, _start_xyz, _rot_vec, _random_ang_vel):
         frames_per_sec = self._fs / self._fade_win_size  # 44100/441= 100frame/s : 초당 프레임
         ang_vel_per_win = _random_ang_vel / frames_per_sec  # 초당 각속도
-        nb_frames = int(np.ceil(event_length_s * frames_per_sec))  # 이벤트 길이(초) -> 총 프레임 수
+        nb_frames = int(np.ceil(event_length_s * frames_per_sec))  # 이벤트 길이(초)
         xyz_array = np.zeros((nb_frames, 3))  # 결과 저장할 배열 : (총 프레임 수, xyz)
         for frame in range(nb_frames):
             _R = self.rotate_matrix_vec_ang(_rot_vec, frame * ang_vel_per_win)
@@ -252,7 +252,7 @@ class FeatureClass:
         return xyz_array
 
 
-    @staticmethod
+    @staticmethod  # 클래스에 속하지만 인스턴스나 클래스 변수에 의존하지 않는 함수는 staticmethod로 정의
     def rotate_matrix_vec_ang(_rot_vec, theta):  # _rot_vec 방향으로 theta만큼 회전하는 회전 행렬 계산
         # u_x_u = u ⊗ u : 회전축의 외적 텐서 (3x3)
         u_x_u = np.array(
@@ -280,13 +280,17 @@ class FeatureClass:
     def sph2cart(az, el, r):
         """
         Converts spherical coordinates given by azimuthal, elevation and radius to cartesian coordinates of x, y and z
+        (r, theta, phi)=(r, el, az) -> (x, y, z)
+        x = r*cos(theta)*cos(phi) = r*cos(el)*cos(az)
+        y = r*cos(theta)*sin(phi) = r*cos(el)*sin(az)
+        z = r*sin(theta) = r*sin(el)
 
         :param az: azimuth angle
         :param el: elevation angle
         :param r: radius
         :return: cartesian coordinate
         """
-        rcos_theta = r * np.cos(el)
+        rcos_theta = r * np.cos(el) 
         x = rcos_theta * np.cos(az)
         y = rcos_theta * np.sin(az)
         z = r * np.sin(el)
@@ -294,6 +298,12 @@ class FeatureClass:
 
     @staticmethod
     def cart2sph(x, y, z):
+        """
+        r = sqrt(x^2 + y^2 + z^2)
+        theta = arctan2(z, sqrt(x^2 + y^2))
+        phi = arctan2(y, x)
+        arctan2(y, x) : x,y 좌표에서 원점과 이루는 각도 (0~360도)
+        """
         XsqPlusYsq = x ** 2 + y ** 2
         r = np.sqrt(XsqPlusYsq + z ** 2)  # r
         elev = np.arctan2(z, np.sqrt(XsqPlusYsq))  # theta
@@ -302,70 +312,96 @@ class FeatureClass:
 
     @staticmethod
     def wrapToPi(rad_list):
-        xwrap = np.remainder(rad_list, 2 * np.pi)
-        mask = np.abs(xwrap) > np.pi
-        xwrap[mask] -= 2 * np.pi * np.sign(xwrap[mask])
+        """
+        임의의 radian 값을 -pi~pi 범위로 정규화
+        """
+        xwrap = np.remainder(rad_list, 2 * np.pi)  # 2*pi로 나눈 나머지 (양수)
+        mask = np.abs(xwrap) > np.pi   # pi 보다 큰 경우
+        xwrap[mask] -= 2 * np.pi * np.sign(xwrap[mask])  # np.sign : 값의 부호만 반환, pi 보다 큰 경우 2*pi 빼거나 더해서 -pi~pi 범위로 변환
         return xwrap
 
     def wrapTo180(self, deg_list):
-        rad_list = deg_list * np.pi / 180.
-        rad_list = self.wrapToPi(rad_list)
-        deg_list = rad_list * 180 / np.pi
+        """
+        임의의 degree 값을 -180~180 범위로 정규화
+        """
+        rad_list = deg_list * np.pi / 180.  # degree -> radian 변환
+        rad_list = self.wrapToPi(rad_list)  # radian 값을 -pi~pi 범위로 정규화
+        deg_list = rad_list * 180 / np.pi   # radian -> degree 변환 
         return deg_list
 
     def _get_doa_labels_regr(self, _desc_file):
-        azi_label = self._default_azi*np.ones((self._max_frames, len(self._unique_classes)))
+        """
+        _desc_file을 읽어 프레임별 DOA 레이블 배열 생성
+        """
+        azi_label = self._default_azi*np.ones((self._max_frames, len(self._unique_classes)))  # shape : (5166, 8 or 11)
         ele_label = self._default_ele*np.ones((self._max_frames, len(self._unique_classes)))
+
+        # 각 이벤트의 elevation각도 순회
         for i, ele_ang in enumerate(_desc_file['ele']):
             start_frame = _desc_file['start'][i]
-            if start_frame > self._max_frames:
+            if start_frame > self._max_frames:  # 이벤트 시작 프레임이 최대 프레임 수보다 크면 skip
                 continue
-            end_frame = self._max_frames if _desc_file['end'][i] > self._max_frames else _desc_file['end'][i]
-            nb_frames = end_frame - start_frame
-            azi_ang = _desc_file['azi'][i]
-            class_ind = self._unique_classes[_desc_file['class'][i]]
-            if self._dataset[0] is 'm':
-                if 'real' in self._dataset:
-                    se_len_s = nb_frames / self._frame_res
+            end_frame = self._max_frames if _desc_file['end'][i] > self._max_frames else _desc_file['end'][i]  # 끝 프레임이 최대 프레임 수보다 크면 최대 프레임으로 설정
+            nb_frames = end_frame - start_frame  # 이벤트 길이(프레임 수) : 레이블 배열 기준 프레임 수
+            azi_ang = _desc_file['azi'][i]  # 이벤트의 방위각
+            class_ind = self._unique_classes[_desc_file['class'][i]]  # 이벤트 클래스에 해당하는 인덱스 (0~7 or 0~10)
+
+            if self._dataset[0] is 'm':  # moving인 경우, 이벤트가 이동하므로 프레임마다 다른 방위각/고도각 레이블 생성
+                if 'real' in self._dataset:  # real dataset인 경우
+                    se_len_s = nb_frames / self._frame_res  # 이벤트 길이(초) = 이벤트 길이(프레임 수) / 초당 프레임 수
                     azi_trajectory = np.floor(
                         np.linspace(azi_ang, azi_ang+_desc_file['ang_vel'][i]*se_len_s, nb_frames)
                     )
-                    azi_ang = self.wrapTo180(azi_trajectory)
+                    # (시작 azi, 시작+각속도*이벤트길이, 이벤트 길이(프레임 수)) -> 프레임마다 선형적으로 증가하는 방위각 궤적 생성
+                    azi_ang = self.wrapTo180(azi_trajectory)  # -180~180 범위로 정규화
 
                 else:
+                    # 시작 방향과 이동 방향을 단위 구면 위의 xyz 좌표로 변환
                     start_xyz = self.sph2cart(azi_ang*np.pi/180, ele_ang*np.pi/180, 1)
                     direction_xyz = self.sph2cart(_desc_file['azi_dir'][i]*np.pi/180, _desc_file['ele_dir'][i]*np.pi/180, 1)
 
-                    rot_vec = self.scaled_cross_product(start_xyz, direction_xyz)
+                    rot_vec = self.scaled_cross_product(start_xyz, direction_xyz)  # 외적으로 회전축 벡터 계산
+                    # 구면 좌표에서 시작 위치(start_xyz)를 회전축(rot_vec)과 각속도(_desc_file['ang_vel'][i])에 따라 회전시켜 프레임마다 위치 궤적 계산
                     xyz_trajectory = self.get_trajectory(
                         nb_frames/self._frame_res, start_xyz, rot_vec, _desc_file['ang_vel'][i]*np.pi/180)
 
+                    # 계산된 xyz 궤적을 다시 구면 좌표로 변환하여 프레임마다 방위각/고도각 레이블 생성
                     tmp_azi_ang, tmp_ele_ang, tmp_r = self.cart2sph(
                         xyz_trajectory[:, 0], xyz_trajectory[:, 1], xyz_trajectory[:, 2])
-                    org_time = np.linspace(0, 1, tmp_azi_ang.shape[0])
-                    new_time = np.linspace(0, 1, end_frame - start_frame)
+                    org_time = np.linspace(0, 1, tmp_azi_ang.shape[0])     # 원본 궤적 샘플의 시간축 (0~1로 정규화, 샘플 수 = get_trajectory의 nb_frames) : 오디오 윈도우 해상도로 계산한 샘플
+                    new_time = np.linspace(0, 1, end_frame - start_frame)  # 목표 프레임의 시간축 (0~1로 정규화, 샘플 수 = 실제 레이블에 채울 구간 길이) : 실제 레이블에 채워야할 프레임 수
+                    # org 프레임 수 > new 프레임 수 : 선형 보간으로 다운샘플링
                     azi_ang = np.interp(new_time, org_time, tmp_azi_ang * 180/np.pi)
                     ele_ang = np.interp(new_time, org_time, tmp_ele_ang * 180/np.pi)
 
+            # ele_ang의 모든 프레임이 elevation 최솟값~최댓값 범위 밖이면 False (0 이면 Fasle, 1 이상이면 True)
             if np.sum(ele_ang >= self._ele_list[0]) and np.sum(ele_ang <= self._ele_list[-1]):
+                # 해당 클래스 열의 start-end 프레임 구간에 각도값 기록
                 azi_label[start_frame:end_frame, class_ind] = azi_ang
                 ele_label[start_frame:end_frame, class_ind] = ele_ang
             else:
                 # print(start_xyz, direction_xyz)
                 print('bad_angle {} {}'.format(azi_ang, ele_ang))
-        doa_label_regr = np.concatenate((azi_label, ele_label), axis=1)
+
+        doa_label_regr = np.concatenate((azi_label, ele_label), axis=1)  
+        # 열 방향으로 이어붙임 (max_frames, n_classes) + (max_frames, n_classes) → (max_frames, n_classes × 2)
+        # 앞쪽 절반 : azimuth 레이블, 뒤쪽 절반 : elevation 레이블
         return doa_label_regr
 
     def _get_se_labels(self, _desc_file):
+        # shape : (최대 프레임 수, 클래스 수) 배열을 0으로 초기화
         se_label = np.zeros((self._max_frames, len(self._unique_classes)))
+
         for i, se_class in enumerate(_desc_file['class']):
             start_frame = _desc_file['start'][i]
             end_frame = self._max_frames if _desc_file['end'][i] > self._max_frames else _desc_file['end'][i]
+            # 해당 클래스 열의 start-end+1(끝 프레임도 포함) 프레임 구간에 1 기록 (음원 존재 표시)
             se_label[start_frame:end_frame + 1, self._unique_classes[se_class]] = 1
         return se_label
 
     def _get_labels_for_file(self, label_filename, _desc_file):
         label_mat = None
+        # regr 모드일 때, SE 레이블과 DOA 레이블을 열 방향으로 합침
         if self._mode is 'regr':
             se_label = self._get_se_labels(_desc_file)
             doa_label = self._get_doa_labels_regr(_desc_file)
