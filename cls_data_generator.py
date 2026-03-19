@@ -16,10 +16,10 @@ class DataGenerator(object):
             shuffle=True, nfft=512, classifier_mode='regr', weakness=0, cnn3d=False, xyz_def_zero=False, extra_name='',
             azi_only=False
     ):
-        self._datagen_mode = datagen_mode
+        self._datagen_mode = datagen_mode  # train/test/val
         self._classifier_mode = classifier_mode
-        self._batch_size = batch_size
-        self._seq_len = seq_len
+        self._batch_size = batch_size  
+        self._seq_len = seq_len  # 시퀀스 길이
         self._shuffle = shuffle
         self._feat_cls = cls_feature_class.FeatureClass(dataset=dataset, ov=ov, split=split, db=db, nfft=nfft)
         self._label_dir = self._feat_cls.get_label_dir(classifier_mode, weakness, extra_name)
