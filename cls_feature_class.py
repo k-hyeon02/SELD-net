@@ -154,15 +154,15 @@ class FeatureClass:
         hann_win = np.repeat(np.hanning(self._win_len)[np.newaxis].T, _nb_ch, 1)  # 모든 채널에 동일한 윈도우를 한번에 곱하기 위함
         nb_bins = self._nfft // 2  # 256
         spectra = np.zeros((self._max_frames, nb_bins, _nb_ch), dtype=complex)  # 결과 저장 배열 초기화, 복소수로 저장(크기+위상)
-        
+
         for ind in range(self._max_frames): # ind : 0, 1, 2, ... , 5156
             start_ind = ind * self._hop_len  # 프레임의 시작 샘플 위치 (256씩 이동) 0, 256, 512, ...
             aud_frame = audio_input[start_ind + np.arange(0, self._win_len), :] * hann_win  # 윈도잉
             spectra[ind] = np.fft.fft(aud_frame, n=self._nfft, axis=0, norm='ortho')[:nb_bins, :]
 
         return spectra
-        # 최종 출력 shape : (max_frames, 256, 4) 
-        # max_frames: 시간 프레임 수 (5166), 256: 주파수 bin 수, 4: 채널 수, dtype: complex(크기+위상 보존) 
+        # 최종 출력 shape : (max_frames, 256, 4)
+        # max_frames: 시간 프레임 수 (5166), 256: 주파수 bin 수, 4: 채널 수, dtype: complex(크기+위상 보존)
 
     def _extract_spectrogram_for_file(self, audio_filename):
         audio_in, fs = self._load_audio(os.path.join(self._aud_dir, audio_filename))
@@ -250,7 +250,6 @@ class FeatureClass:
             # 시작 위치를 R만큼 회전시켜 해당 프레임의 위치 계산
 
         return xyz_array
-
 
     @staticmethod  # 클래스에 속하지만 인스턴스나 클래스 변수에 의존하지 않는 함수는 staticmethod로 정의
     def rotate_matrix_vec_ang(_rot_vec, theta):  # _rot_vec 방향으로 theta만큼 회전하는 회전 행렬 계산
@@ -409,7 +408,7 @@ class FeatureClass:
         else:
             print("The supported modes are 'regr', you provided {}".format(self._mode))
         print(label_mat.shape)
-        np.save(os.path.join(self._label_dir, label_filename), label_mat)
+        np.save(os.path.join(self._label_dir, label_filename), label_mat)  # shape : (max_frames, n_classes + n_classes*2) = (5166, 8+16) or (5166, 11+22)
 
     # ------------------------------- EXTRACT FEATURE AND PREPROCESS IT -------------------------------
     def extract_all_feature(self, extra=''):
@@ -422,6 +421,7 @@ class FeatureClass:
         print('\t\taud_dir {}\n\t\tdesc_dir {}\n\t\tfeat_dir {}'.format(
             self._aud_dir, self._desc_dir, self._feat_dir))
 
+        # desc_dir 폴더의 각 csv 메타데이터 파일에 대응하는 wav 파일에서 스펙트로그램 추출
         for file_cnt, file_name in enumerate(os.listdir(self._desc_dir)):
             print('file_cnt {}, file_name {}'.format(file_cnt, file_name))
             wav_filename = '{}.wav'.format(file_name.split('.')[0])
@@ -441,28 +441,29 @@ class FeatureClass:
         spec_scaler = preprocessing.StandardScaler()
         train_cnt = 0
         for file_cnt, file_name in enumerate(os.listdir(self._feat_dir)):
-            if 'train' in file_name:
+            if 'train' in file_name:  # train 파일에 대해서만 스케일러 학습
                 print(file_cnt, train_cnt, file_name)
                 feat_file = np.load(os.path.join(self._feat_dir, file_name))
-                spec_scaler.partial_fit(np.concatenate((np.abs(feat_file), np.angle(feat_file)), axis=1))
+                # 진폭, 위상 열 방향으로 합쳐 scaler로 정규화 : (max_frames, n_bins*2) = (5166, 1024*2) - 주파수 bin의 진폭/위상이 시간에 걸쳐 어떻게 분포하는지 정규화
+                spec_scaler.partial_fit(np.concatenate((np.abs(feat_file), np.angle(feat_file)), axis=1))  # partial_fit : 전체 데이터를 한번에 메모리에 올리지 않고 조금씩 나눠서 스케일러 학습(평균, 표준편차 계산)
                 del feat_file
                 train_cnt += 1
         joblib.dump(
             spec_scaler,
             normalized_features_wts_file
-        )
+        )  # 학습된 스케일러 저장 (평균과 표준편차 정보 포함)
 
         print('Normalizing feature files:')
         # spec_scaler = joblib.load(normalized_features_wts_file) #load weights again using this command
-        for file_cnt, file_name in enumerate(os.listdir(self._feat_dir)):
-                print(file_cnt, file_name)
-                feat_file = np.load(os.path.join(self._feat_dir, file_name))
-                feat_file = spec_scaler.transform(np.concatenate((np.abs(feat_file), np.angle(feat_file)), axis=1))
-                np.save(
+        for file_cnt, file_name in enumerate(os.listdir(self._feat_dir)):  # train/test 구분 없이 모든 파일에 대해 스케일러로 정규화
+            print(file_cnt, file_name)
+            feat_file = np.load(os.path.join(self._feat_dir, file_name))
+            feat_file = spec_scaler.transform(np.concatenate((np.abs(feat_file), np.angle(feat_file)), axis=1))
+            np.save(
                     os.path.join(self._feat_dir_norm, file_name),
                     feat_file
                 )
-                del feat_file
+            del feat_file
         print('normalized files written to {} folder and the scaler to {}'.format(
             self._feat_dir_norm, normalized_features_wts_file))
 
@@ -477,18 +478,18 @@ class FeatureClass:
         print('Estimating weights for normalizing feature files:')
         print('\t\tfeat_dir {}'.format(self._feat_dir))
 
-        spec_scaler = joblib.load(normalized_features_wts_file)
+        spec_scaler = joblib.load(normalized_features_wts_file)  # 저장된 scaler 불러오기
         print('Normalizing feature files:')
         # spec_scaler = joblib.load(normalized_features_wts_file) #load weights again using this command
         for file_cnt, file_name in enumerate(os.listdir(self._feat_dir)):
-                print(file_cnt, file_name)
-                feat_file = np.load(os.path.join(self._feat_dir, file_name))
-                feat_file = spec_scaler.transform(np.concatenate((np.abs(feat_file), np.angle(feat_file)), axis=1))
-                np.save(
+            print(file_cnt, file_name)
+            feat_file = np.load(os.path.join(self._feat_dir, file_name))
+            feat_file = spec_scaler.transform(np.concatenate((np.abs(feat_file), np.angle(feat_file)), axis=1))
+            np.save(
                     os.path.join(self._feat_dir_norm, file_name),
                     feat_file
                 )
-                del feat_file
+            del feat_file
         print('normalized files written to {} folder and the scaler to {}'.format(
             self._feat_dir_norm, normalized_features_wts_file))
 
