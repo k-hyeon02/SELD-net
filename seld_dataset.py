@@ -174,6 +174,7 @@ class SELDDataset(Dataset):
 
             # 음원이 없는 프레임의 DOA를 (0, 0, 0)으로 설정
             if self._xyz_def_zero:
+                # elevation이 기본값과 같은 위치, 음원이 없는 프레임은 기본 ele로 표시되어 있음
                 no_sound = np.where(label_seq[:, 2*self._nb_classes:] == self._default_ele)
                 x[no_sound] = 0
                 y[no_sound] = 0
@@ -189,13 +190,15 @@ class SELDDataset(Dataset):
         )
 
     def get_nb_classes(self):
+        # 클래스 수
         return self._nb_classes
 
     def nb_frames_1s(self):
+        # 1초의 frame 수
         return self._feat_cls.nb_frames_1s()
 
     def get_data_sizes(self):
-        """배치 제외한 단일 샘플의 shape 반환"""
+        # 배치 제외한 단일 샘플의 shape 반환
         doa_dim = 2 if self._azi_only else 3
         feat_shape = (self._2_nb_ch, self._seq_len, self._feat_len)
         label_shape = [
