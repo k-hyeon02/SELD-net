@@ -1,5 +1,33 @@
 # Contains routines for labels creation, features extraction and normalization
-#
+"""
+[원본 데이터]
+wav 파일 + csv annotation
+        │
+        ├─────────────────────────────────────────┐
+        ▼                                         ▼
+[피처 추출]                               [레이블 생성]
+extract_all_feature                    extract_all_labels
+    │                                         │
+    ▼                                         ▼
+_extract_spectrogram_for_file          _read_desc_file
+    │                                         │
+    ▼                                         ▼
+_spectrogram                           _get_labels_for_file
+    │                                    ├─ _get_se_labels
+    ▼                                    └─ _get_doa_labels_regr
+.npy 저장                                      │
+        │                                      ▼
+        ▼                                  .npy 저장
+[정규화]
+preprocess_features / normalize_features
+    │
+    ▼
+정규화된 .npy 저장
+        │
+        └──────────────┐
+                       ▼
+              [신경망 학습 준비 완료]
+"""
 
 
 import os
