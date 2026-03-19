@@ -7,10 +7,10 @@ import cls_feature_class
 
 class SELDDataset(Dataset):
     """
-    PyTorch Dataset for SELDnet.
+    PyTorch Dataset for SELDnet
 
-    전처리된 .npy 피처/레이블 파일을 읽어 seq_len 길이의 시퀀스 단위로 반환.
-    DataLoader와 함께 사용하면 배치, 셔플, 병렬 로딩을 자동으로 처리.
+    전처리된 .npy 피처/레이블 파일을 읽어 seq_len 길이의 시퀀스 단위로 반환
+    DataLoader와 함께 사용하면 배치, 셔플, 병렬 로딩을 자동으로 처리
 
     반환 샘플:
         feat      : (2*nb_ch, seq_len, feat_len)  - 스펙트로그램 (channels-first)
@@ -24,19 +24,25 @@ class SELDDataset(Dataset):
             xyz_def_zero=False, extra_name='', azi_only=False
     ):
         """
+        1. FeatureClass로 피처/레이블 폴더 경로 설정
+        2. 'train' or 'test' 파일만 필터링 → filenames_list
+        3. 첫 파일 열어서 shape 파악 (nb_frames_file, feat_len, label_len)
+        4. seqs_per_file = nb_frames_file // seq_len
+        5. 캐시 딕셔너리 초기화
+        
         Args:
-            datagen_mode  : 'train' 또는 'test' - 해당 모드의 파일만 로드
-            dataset       : 데이터셋 이름 (ansim, resim, real 등)
-            ov            : 최대 동시 겹치는 음원 수 (1, 2, 3)
-            split         : 교차검증 split 번호
-            db            : 신호 대 잡음비
-            seq_len       : 한 시퀀스의 프레임 수 (모델 입력 길이)
-            nfft          : FFT 크기
-            classifier_mode: 레이블 형식 ('regr'만 지원)
-            weakness      : 레이블 약화 정도 (regr에서는 미사용)
-            xyz_def_zero  : 음원 없는 프레임의 DOA를 (0,0,0)으로 설정할지 여부
-            azi_only      : True면 DOA를 (x,y)만, False면 (x,y,z)로 반환
-            extra_name    : 폴더명에 붙는 추가 문자열
+        datagen_mode  : 'train' 또는 'test' - 해당 모드의 파일만 로드
+        dataset       : 데이터셋 이름 (ansim, resim, real 등)
+        ov            : 최대 동시 겹치는 음원 수 (1, 2, 3)
+        split         : 교차검증 split 번호
+        db            : 신호 대 잡음비
+        seq_len       : 한 시퀀스의 프레임 수 (모델 입력 길이)
+        nfft          : FFT 크기
+        classifier_mode: 레이블 형식 ('regr'만 지원)
+        weakness      : 레이블 약화 정도 (regr에서는 미사용)
+        xyz_def_zero  : 음원 없는 프레임의 DOA를 (0,0,0)으로 설정할지 여부
+        azi_only      : True면 DOA를 (x,y)만, False면 (x,y,z)로 반환
+        extra_name    : 폴더명에 붙는 추가 문자열
         """
         self._datagen_mode = datagen_mode
         self._seq_len = seq_len        # 한 시퀀스의 프레임 수
@@ -91,8 +97,25 @@ class SELDDataset(Dataset):
         return len(self._filenames_list) * self._seqs_per_file
 
     def __getitem__(self, idx):
-        # DataLoader가 idx를 넘기면 해당 시퀀스 하나를 반환
-        # idx → 몇 번째 파일의 몇 번째 시퀀스인지 계산
+        """
+        DataLoader가 idx를 넘기면 해당 시퀀스 하나를 반환
+        idx → 몇 번째 파일의 몇 번째 시퀀스인지 계산
+
+        idx
+         ↓
+        file_idx = idx // seqs_per_file  → 몇 번째 파일?
+        seq_idx  = idx % seqs_per_file   → 그 파일의 몇 번째 시퀀스?
+         ↓
+        캐시 확인 → 없으면 .npy 로드 후 캐시 저장
+         ↓
+        start = seq_idx * seq_len
+        end   = start + seq_len
+         ↓
+        feat[start:end]  → reshape → transpose → FloatTensor
+        label[start:end] → SED 분리 / DOA 직교 좌표 변환 → FloatTensor
+         ↓
+        (feat, sed_label, doa_label) 반환
+        """
         file_idx = idx // self._seqs_per_file  # 파일 인덱스
         seq_idx  = idx % self._seqs_per_file   # 해당 파일 내 시퀀스 인덱스
 
@@ -158,7 +181,7 @@ class SELDDataset(Dataset):
 
             doa_label = np.concatenate((x, y, z), axis=-1)  # (seq_len, nb_classes*3)
 
-        # numpy → PyTorch Tensor로 변환 후 반환
+        # numpy → PyTorch Tensor로 변환
         return (
             torch.FloatTensor(feat_seq),    # (2*nb_ch, seq_len, feat_len)
             torch.FloatTensor(sed_label),   # (seq_len, nb_classes)
