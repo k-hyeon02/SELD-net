@@ -41,6 +41,7 @@ def get_params(argv):
     # ########### User defined parameters ##############
     if argv == '1':
         print("USING DEFAULT PARAMETERS\n")
+        params['quick_test'] = False
 
     # Quick test
     elif argv == '999':
