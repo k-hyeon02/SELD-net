@@ -7,7 +7,7 @@ import numpy as np
 from sklearn.metrics import confusion_matrix
 from IPython import embed
 
-eps = np.finfo(np.float).eps
+eps = np.finfo(float).eps
 
 ###############################################################
 # Scoring functions
