@@ -35,7 +35,7 @@ import numpy as np
 import scipy.io.wavfile as wav  # wav 파일 읽기
 import utils
 from sklearn import preprocessing  # StandardScaler
-from sklearn.externals import joblib  # scaler 저장/불러오기
+import joblib  # scaler 저장/불러오기
 from IPython import embed  # 디버깅
 import matplotlib.pyplot as plot
 plot.switch_backend('agg')  # 디스플레이 없는 서버에서 그래프 저장 가능하게
@@ -86,7 +86,7 @@ class FeatureClass:
         self._win_len = self._nfft  # FFT window 크기
         self._hop_len = self._nfft//2  # widow의 50% overlap
         self._dataset = dataset
-        self._eps = np.spacing(np.float(1e-16))  # epsilon : 0으로 나누기 방지
+        self._eps = np.spacing(float(1e-16))  # epsilon : 0으로 나누기 방지
 
         # If circular-array 8 channels else 4 for Ambisonic
         if 'c' in self._dataset:
