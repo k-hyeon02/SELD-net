@@ -1,5 +1,6 @@
 # Datasets and large files
 data/
+logs/
 
 # Download scripts and logs
 download_datasets.sh
