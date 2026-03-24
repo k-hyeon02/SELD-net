@@ -194,16 +194,20 @@ def main(argv):
         sed_pred_2d = evaluation_metrics.reshape_3Dto2D(sed_pred_all) > 0.5  # threshold 0.5
         doa_pred_2d = evaluation_metrics.reshape_3Dto2D(doa_pred_all)
 
+        n_pred = sed_pred_2d.shape[0]
+        gt_sed_eval = gt_sed[:n_pred]
+        gt_doa_eval = gt_doa[:n_pred]
+
         sed_loss[epoch_cnt, :] = evaluation_metrics.compute_sed_scores(
-            sed_pred_2d, gt_sed, train_dataset.nb_frames_1s()
+            sed_pred_2d, gt_sed_eval, train_dataset.nb_frames_1s()
         )
         if params['azi_only']:
             doa_loss[epoch_cnt, :], conf_mat = evaluation_metrics.compute_doa_scores_regr_xy(
-                doa_pred_2d, gt_doa, sed_pred_2d, gt_sed
+                doa_pred_2d, gt_doa_eval, sed_pred_2d, gt_sed_eval
             )
         else:
             doa_loss[epoch_cnt, :], conf_mat = evaluation_metrics.compute_doa_scores_regr_xyz(
-                doa_pred_2d, gt_doa, sed_pred_2d, gt_sed
+                doa_pred_2d, gt_doa_eval, sed_pred_2d, gt_sed_eval
             )
 
         # SELD 통합 지표 계산 (낮을수록 좋음)
