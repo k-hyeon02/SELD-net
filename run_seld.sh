@@ -5,6 +5,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --gres=gpu:1
+#SBATCH --mem=40G
 #SBATCH --output=logs/seld_%j.out
 #SBATCH --error=logs/seld_%j.err
 
@@ -31,7 +32,7 @@ conda activate dlearn
 
 cd /home/s2021102349/seld-net-master
 
-python seld_train.py $JOB_ID $TASK_ID
+python -u seld_train.py $JOB_ID $TASK_ID
 
 echo "====================================="
 echo "End time : $(date)"
