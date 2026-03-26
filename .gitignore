@@ -1,7 +1,7 @@
 # Datasets and large files
 data/
 logs/
-
+models/
 # Download scripts and logs
 download_datasets.sh
 download_log.txt
