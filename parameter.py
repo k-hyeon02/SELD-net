@@ -42,6 +42,9 @@ def get_params(argv):
     if argv == '1':
         print("USING DEFAULT PARAMETERS\n")
         params['quick_test'] = False
+        params['batch_size'] = 16
+        params['sequence_length'] = 512
+        params['patience'] = 100
 
     # Quick test
     elif argv == '999':
